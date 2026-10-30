@@ -1,0 +1,23 @@
+# Python
+backend/.venv/
+backend/.pytest_cache/
+backend/**/__pycache__/
+backend/*.pyc
+
+# Frontend / Node
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+frontend/.env
+
+# Environment files
+**/.env
+!**/.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
