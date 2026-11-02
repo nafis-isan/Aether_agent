@@ -1,4 +1,5 @@
 import asyncio
+import ipaddress
 import json
 from uuid import UUID
 
@@ -6,12 +7,14 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, or_, select
 
-from app.core.security import decode_access_token
+from app.config import settings
+from app.core.security import decode_access_token, get_local_user
 from app.database import AsyncSessionLocal
 from app.database.models import AgentEvent, AgentRun, Conversation, User
 
 router = APIRouter(tags=["realtime"])
 _AUTH_SUBPROTOCOL_PREFIX = "aether.bearer."
+_LOCAL_SUBPROTOCOL = "aether.local"
 _MAX_REPLAY_CURSORS = 1000
 _EVENT_BATCH_SIZE = 100
 
@@ -43,6 +46,36 @@ async def stream_conversation_events(websocket: WebSocket, conversation_id: UUID
         (protocol[len(_AUTH_SUBPROTOCOL_PREFIX):] for protocol in protocols if protocol.startswith(_AUTH_SUBPROTOCOL_PREFIX)),
         None,
     )
+    local_protocol = _LOCAL_SUBPROTOCOL in protocols
+    local_user_id: str | None = None
+
+    if settings.local_auth_mode:
+        client = websocket.client
+        origin = websocket.headers.get("origin")
+        allowed_origins = {
+            entry.strip()
+            for entry in settings.cors_allowed_origins.split(",")
+            if entry.strip()
+        }
+        try:
+            is_loopback = client is not None and ipaddress.ip_address(client.host).is_loopback
+        except ValueError:
+            is_loopback = False
+        if not is_loopback:
+            await websocket.close(code=4403, reason="Local access only")
+            return
+        if origin is not None and origin not in allowed_origins:
+            await websocket.close(code=4403, reason="Origin is not allowed")
+            return
+        if not local_protocol:
+            await websocket.accept(subprotocol="aether")
+            await websocket.close(code=4401, reason="Local access protocol required")
+            return
+    elif credential is None:
+        await websocket.accept(subprotocol="aether")
+        await websocket.close(code=4401, reason="Authentication failed")
+        return
+
     try:
         cursors = _read_replay_cursors(websocket.query_params.get("after"))
     except ValueError:
@@ -51,20 +84,21 @@ async def stream_conversation_events(websocket: WebSocket, conversation_id: UUID
         return
 
     await websocket.accept(subprotocol="aether")
-    try:
-        if not credential:
-            raise ValueError("Missing WebSocket credentials")
-        user_id = decode_access_token(credential)
-    except ValueError:
-        await websocket.close(code=4401, reason="Authentication failed")
-        return
-
     session_factory = getattr(websocket.app.state, "test_session_factory", AsyncSessionLocal)
     async with session_factory() as session:
+        if settings.local_auth_mode:
+            local_user = await get_local_user(session)
+            local_user_id = local_user.id
+        else:
+            try:
+                user_id = decode_access_token(credential)
+            except ValueError:
+                await websocket.close(code=4401, reason="Authentication failed")
+                return
         conversation = await session.scalar(
             select(Conversation).where(
                 Conversation.id == str(conversation_id),
-                Conversation.user_id == user_id,
+                Conversation.user_id == local_user_id if settings.local_auth_mode else Conversation.user_id == user_id,
             )
         )
         if conversation is None:
@@ -78,7 +112,7 @@ async def stream_conversation_events(websocket: WebSocket, conversation_id: UUID
                 run_ids_result = await session.scalars(
                     select(AgentRun.id).where(
                         AgentRun.conversation_id == str(conversation_id),
-                        AgentRun.user_id == user_id,
+                        AgentRun.user_id == local_user_id if settings.local_auth_mode else AgentRun.user_id == user_id,
                     )
                 )
                 run_ids = list(run_ids_result.all())

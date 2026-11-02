@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "awwwards": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "awwwards-mcp@1.16.1"]
+    }
+  }
+}

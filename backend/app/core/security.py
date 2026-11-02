@@ -1,13 +1,16 @@
+import ipaddress
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError, VerificationError
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,6 +19,8 @@ from app.database.models import User
 
 password_hasher = PasswordHasher()
 bearer_scheme = HTTPBearer(auto_error=False)
+LOCAL_USER_ID = str(uuid5(NAMESPACE_URL, "aether:single-user-local-profile"))
+LOCAL_USER_EMAIL = "local-user@example.com"
 
 
 def hash_password(password: str) -> str:
@@ -52,10 +57,45 @@ def decode_access_token(token: str) -> str:
         raise ValueError("Invalid access token") from None
 
 
+async def get_local_user(session: AsyncSession) -> User:
+    user = await session.scalar(select(User).where(User.id == LOCAL_USER_ID))
+    if user is not None:
+        return user
+
+    user = User(
+        id=LOCAL_USER_ID,
+        email=LOCAL_USER_EMAIL,
+        name="Local User",
+        password_hash=hash_password(secrets.token_urlsafe(48)),
+    )
+    session.add(user)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        user = await session.scalar(select(User).where(User.id == LOCAL_USER_ID))
+        if user is None:
+            raise
+    else:
+        await session.refresh(user)
+    return user
+
+
 async def get_current_user(
+    request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
+    if settings.local_auth_mode:
+        if request.client is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Local access only")
+        try:
+            if not ipaddress.ip_address(request.client.host).is_loopback:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Local access only")
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Local access only") from None
+        return await get_local_user(session)
+
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required",

@@ -32,10 +32,12 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python -m alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Before starting the backend, set a unique `JWT_SECRET` and your OpenRouter key in `backend/.env`.
+`LOCAL_AUTH_MODE=true` is the default for this local Laragon setup: Aether opens directly into a single local profile and binds to `127.0.0.1`. Local mode rejects requests from non-loopback clients and untrusted browser origins; do not expose or reverse-proxy the backend. It is intended for one trusted Windows account and does not protect data from other people or processes using the same account. Existing registered accounts and their data are left unchanged and are not merged into the local profile.
+To restore account registration and login, set `LOCAL_AUTH_MODE=false`; authentication is then required for protected API routes.
 The interactive API is available at `http://localhost:8000/docs`.
 
 ### Frontend
@@ -51,6 +53,28 @@ npm run dev
 - Frontend: `frontend/.env.example`
 - Backend: `backend/.env.example`
 
+## Awwwards MCP in VS Code
+
+The workspace MCP server is configured in `.vscode/mcp.json`. It runs the pinned
+`awwwards-mcp@1.16.1` package through `npx`; you do not need to add it to the
+frontend dependencies or run `npm install` for it. Node.js 22.13 or newer is
+required.
+
+To use it:
+
+1. Open this repository as a folder in VS Code.
+2. Open `.vscode/mcp.json` and choose **Start** for the `awwwards` server when
+   VS Code prompts, or start it from the MCP server controls in the Chat view.
+3. In Copilot Chat, select **Agent** mode and ask for design research, for
+   example: “Use Awwwards MCP to find references for a minimal dark AI
+   workspace, then summarize the visual patterns.”
+4. Approve the server the first time if VS Code asks. Restart the server after
+   changing its configuration.
+
+The standard `npx` setup provides the core MCP tools. Browser capture and
+screenshot-analysis tools require the optional Playwright/Chromium setup
+described by the `awwwards-mcp` package documentation. No API key is required.
+
 ## Notes
 
 - Real secrets must never be committed.
@@ -59,9 +83,10 @@ npm run dev
 
 ## Authentication and AI chat
 
-- Register with `POST /api/v1/auth/register` using `email`, `password` (at least 12 characters), and `name`.
-- Log in with `POST /api/v1/auth/login`; send its `access_token` as `Authorization: Bearer <token>`.
-- Use `GET /api/v1/auth/me` to verify the authenticated account.
+- `GET /api/v1/auth/mode` reports whether local authentication bypass is active.
+- With the default local mode, Aether automatically creates/reuses one internal local profile; the UI skips login and API requests do not need a bearer token. Registration/login endpoints are disabled in this mode.
+- Set `LOCAL_AUTH_MODE=false` to use `POST /api/v1/auth/register` with `email`, `password` (at least 12 characters), and `name`, then log in at `POST /api/v1/auth/login`; send the returned `access_token` as `Authorization: Bearer <token>`.
+- Use `GET /api/v1/auth/me` to verify the current account/profile.
 - Send a message using `POST /api/v1/chat` with `{"message":"Hello","model_role":"general"}`. Use `"coding"` for the coding model. Omit `conversation_id` to start a conversation or pass the returned ID to continue it.
 - List owned conversations at `GET /api/v1/conversations` and messages at `GET /api/v1/conversations/{conversation_id}/messages`.
 - The response includes `run_id`, `selected_agent`, and `pending_approval_id` when an agent action needs a decision.
@@ -71,7 +96,7 @@ npm run dev
 - Resume failed workflows with `POST /api/v1/agents/runs/{run_id}/resume`; inspect persisted activity at `GET /api/v1/agents/runs/{run_id}/events`.
 - Passwords use Argon2id hashing; chat messages and conversations are scoped to their owner in MySQL.
 - OpenRouter reasoning details are preserved server-side for model continuation and are not included in chat API responses.
-- The Nuxt homepage provides account registration/login, conversation history, model selection, live agent activity, approval actions, and memory controls. Its bearer token stays in tab memory and is cleared on refresh/sign-out.
+- The Nuxt homepage provides local single-user startup by default, plus account registration/login when local mode is disabled; it also includes conversation history, model selection, live agent activity, approval actions, and memory controls.
 
 ## Verification
 

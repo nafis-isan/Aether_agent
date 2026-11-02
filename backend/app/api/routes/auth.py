@@ -14,6 +14,8 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(payload: UserCreate, session: AsyncSession = Depends(get_db)) -> User:
+    if settings.local_auth_mode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account registration is disabled in local mode")
     user = User(
         email=str(payload.email).lower(),
         name=payload.name.strip(),
@@ -33,6 +35,8 @@ async def register(payload: UserCreate, session: AsyncSession = Depends(get_db))
 
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)) -> TokenResponse:
+    if settings.local_auth_mode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Login is disabled in local mode")
     result = await session.execute(select(User).where(User.email == str(payload.email).lower()))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
@@ -46,6 +50,11 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db)) 
         expires_in=settings.access_token_expire_minutes * 60,
         user=UserRead.model_validate(user),
     )
+
+
+@router.get("/mode")
+async def read_auth_mode() -> dict[str, bool]:
+    return {"local_auth": settings.local_auth_mode}
 
 
 @router.get("/me", response_model=UserRead)

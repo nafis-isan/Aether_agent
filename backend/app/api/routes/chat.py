@@ -33,6 +33,8 @@ MAX_CONTEXT_MESSAGES = 20
 def provider_http_status(error: OpenRouterError) -> int:
     if error.code == "configuration_error":
         return status.HTTP_503_SERVICE_UNAVAILABLE
+    if error.code == "browser_unavailable":
+        return status.HTTP_503_SERVICE_UNAVAILABLE
     if error.code == "invalid_api_key":
         return status.HTTP_502_BAD_GATEWAY
     if error.code == "rate_limited":

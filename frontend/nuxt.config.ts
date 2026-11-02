@@ -4,7 +4,8 @@ export default defineNuxtConfig({
   app: {
     head: {
       title: 'Aether',
-      meta: [{ name: 'description', content: 'Aether personal AI assistant foundation' }]
+      meta: [{ name: 'description', content: 'Aether personal AI assistant foundation' }],
+      link: [{ rel: 'icon', type: 'image/png', href: '/aether-monogram.png' }]
     }
   },
   runtimeConfig: {
